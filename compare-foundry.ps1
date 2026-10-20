@@ -22,7 +22,10 @@ $ErrorActionPreference = "Stop"
 $ignore = '(^|\.)(id|name|etag|principalId|tenantId|clientId|endpoint|endpoints|internalId|customSubDomainName|resourceGroup|createdAt|lastModifiedAt|createdBy|lastModifiedBy|systemData|resourceId|privateEndpoint\.id|provisioningState|dateCreated|dateModified|createdByType|lastModifiedByType|subscriptionId|portalUrl|scope|assignmentId|createdOn|updatedOn|description)(\.|=|$)'
 
 function Invoke-AzJson([string[]] $AzArgs) {
-    $out = & az @AzArgs -o json 2>$null
+    # az writes warnings to stderr; don't let PowerShell turn them into terminating errors.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { $out = & az @AzArgs -o json 2>$null } finally { $ErrorActionPreference = $prev }
     if ($LASTEXITCODE -ne 0 -or -not $out) { return $null }
     return ($out | ConvertFrom-Json)
 }
@@ -58,19 +61,17 @@ function Get-Snapshot([string] $ProjectId, [string] $Label) {
     $deployments = Invoke-AzJson @("rest", "--method", "get", "--url", "https://management.azure.com$acctId/deployments?api-version=2025-06-01")
     $privateEndpoints = Invoke-AzJson @("rest", "--method", "get", "--url", "https://management.azure.com$acctId/privateEndpointConnections?api-version=2025-06-01")
 
+    # Filter by principalId locally: `--assignee` triggers a Graph lookup that fails without Graph permissions.
+    $acctRoles = @(Invoke-AzJson @("role", "assignment", "list", "--scope", $acctId, "--include-inherited", "--subscription", $sub))
     $roles = @()
-    $principals = @($project.identity.principalId, $account.identity.principalId) | Where-Object { $_ }
-    foreach ($principalId in $principals) {
-        $ra = Invoke-AzJson @("role", "assignment", "list", "--assignee", $principalId, "--all", "--subscription", $sub)
-        foreach ($r in @($ra)) {
-            if ($r.scope -like "$acctId*" -or $acctId -like "$($r.scope)*") {
-                $kind = if ($principalId -eq $project.identity.principalId) { "projectMI" } else { "accountMI" }
-                $roles += [pscustomobject]@{ identity = $kind; role = $r.roleDefinitionName; scopeLevel = ($r.scope -replace '^.*/providers/', '' -replace '[^/]+$', '<name>') }
-            }
+    foreach ($r in $acctRoles) {
+        $kind = $null
+        if ($project.identity.principalId -and $r.principalId -eq $project.identity.principalId) { $kind = "projectMI" }
+        elseif ($account.identity.principalId -and $r.principalId -eq $account.identity.principalId) { $kind = "accountMI" }
+        if ($kind) {
+            $roles += [pscustomobject]@{ identity = $kind; role = $r.roleDefinitionName; scopeLevel = ($r.scope -replace '^.*/providers/', '' -replace '[^/]+$', '<name>') }
         }
     }
-    # Who else has access to the account (user-level roles), role names only
-    $acctRoles = Invoke-AzJson @("role", "assignment", "list", "--scope", $acctId, "--include-inherited", "--subscription", $sub)
 
     [pscustomobject]@{
         account           = $account
