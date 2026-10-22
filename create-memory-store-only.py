@@ -3,10 +3,12 @@
 Usage:
     python create-memory-store-only.py
 
-Required environment variables:
+Reads a .env file next to this script (same one as the other scripts), or the
+environment. Required:
     FOUNDRY_PROJECT_ENDPOINT   e.g. https://<account>.services.ai.azure.com/api/projects/<project>
-    MEMORY_CHAT_MODEL          chat model deployment name in the project
-    MEMORY_EMBEDDING_MODEL     embedding model deployment name in the project
+    MEMORY_STORE_CHAT_MODEL    chat model deployment name in the project
+    MEMORY_STORE_EMBEDDING_MODEL  embedding model deployment name in the project
+    (MEMORY_CHAT_MODEL / MEMORY_EMBEDDING_MODEL are also accepted.)
 
 Optional:
     MEMORY_STORE_NAME          defaults to memorystore-test-<timestamp>
@@ -24,7 +26,10 @@ from azure.ai.projects.models import (
     MemoryStoreDefaultOptions,
 )
 from azure.identity import AzureCliCredential
+from dotenv import load_dotenv
 
+# Load the .env next to this script regardless of the current directory.
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 PROFILE_DETAILS = (
     "Remember work preferences, communication style, preferred formats, recurring "
     "projects, teams, and working hours. Do NOT store credentials, secrets, health, "
@@ -35,8 +40,10 @@ PROFILE_DETAILS = (
 def main() -> None:
     try:
         endpoint = os.environ["FOUNDRY_PROJECT_ENDPOINT"]
-        chat_model = os.environ["MEMORY_CHAT_MODEL"]
-        embedding_model = os.environ["MEMORY_EMBEDDING_MODEL"]
+        chat_model = os.environ.get("MEMORY_CHAT_MODEL") or os.environ["MEMORY_STORE_CHAT_MODEL"]
+        embedding_model = (
+            os.environ.get("MEMORY_EMBEDDING_MODEL") or os.environ["MEMORY_STORE_EMBEDDING_MODEL"]
+        )
     except KeyError as missing:
         sys.exit(f"Missing required environment variable: {missing}")
 
